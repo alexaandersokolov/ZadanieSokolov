@@ -5,10 +5,10 @@ import zlib
 class GitVisualizer:
     def __init__(self):
         # Конструктор класса, здесь можно разместить инициализацию объекта, если необходимо
-        # Является заглушкой
         pass
 
-    def get_object_content(self, object_path):
+    @staticmethod
+    def get_object_content(object_path):
         """
         Получает содержимое git-объекта из файла по указанному пути.
 
@@ -29,7 +29,12 @@ class GitVisualizer:
         :return: Хэш дерева, связанного с коммитом.
         """
         commit_path = os.path.join('.git', 'objects', commit_hash[:2], commit_hash[2:])
-        commit_content = self.get_object_content(commit_path)
+        try:
+            commit_content = self.get_object_content(commit_path)
+        except ValueError:
+            print(f"Skipping commit {commit_hash}: embedded null character.")
+            return None
+
         lines = commit_content.split('\n')
         tree_hash = lines[0].split(' ')[1]
         return tree_hash
@@ -42,9 +47,17 @@ class GitVisualizer:
         :return: Список словарей с информацией о файлах и поддеревьях в дереве.
         """
         tree_path = os.path.join('.git', 'objects', tree_hash[:2], tree_hash[2:])
-        tree_content = self.get_object_content(tree_path)
+        try:
+            tree_content = self.get_object_content(tree_path)
+        except ValueError:
+            print(f"Skipping tree {tree_hash}: embedded null character.")
+            return []
+
+        # Игнорировать строки с нулевыми символами
+        lines = [line for line in tree_content.split('\n') if '\x00' not in line]
+
         entries = []
-        for line in tree_content.split('\n'):
+        for line in lines:
             if not line:
                 continue
             entry_info = line.split(' ')
@@ -64,6 +77,9 @@ class GitVisualizer:
         dot_graph = f'{indent}"{commit_hash}" [label="{commit_hash[:7]}"];\n'
 
         tree_hash = self.get_commit_info(commit_hash)
+        if tree_hash is None:
+            return dot_graph
+
         entries = self.get_tree_entries(tree_hash)
 
         for entry in entries:
@@ -97,4 +113,22 @@ class GitVisualizer:
         # Получаем хеш последнего коммита
         latest_commit_hash = self.get_latest_commit_hash()
 
-        # Генерируем DOT
+        print(f"Latest commit hash: {latest_commit_hash}")
+
+        # Генерируем DOT-граф
+        dot_graph = self.generate_dot_graph(latest_commit_hash)
+
+        print("DOT graph:")
+        print(dot_graph)
+
+        # Записываем DOT-граф в файл
+        with open('git_graph.dot', 'w') as f:
+            f.write('graph git {\n')
+            f.write(dot_graph)
+            f.write('}\n')
+
+
+if __name__ == '__main__':
+    # Создаем экземпляр класса GitVisualizer и вызываем метод main()
+    git_visualizer = GitVisualizer()
+    git_visualizer.main()
