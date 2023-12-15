@@ -19,25 +19,7 @@ class GitVisualizer:
             compressed_content = f.read()
             # Распаковка zlib-сжатого содержимого объекта
             content = zlib.decompress(compressed_content)
-            return content.decode('utf-8')
-
-    def get_commit_info(self, commit_hash):
-        """
-        Получает информацию о коммите, основываясь на его хэше.
-
-        :param commit_hash: Хэш коммита.
-        :return: Хэш дерева, связанного с коммитом.
-        """
-        commit_path = os.path.join('.git', 'objects', commit_hash[:2], commit_hash[2:])
-        try:
-            commit_content = self.get_object_content(commit_path)
-        except ValueError:
-            print(f"Skipping commit {commit_hash}: embedded null character.")
-            return None
-
-        lines = commit_content.split('\n')
-        tree_hash = lines[0].split(' ')[1]
-        return tree_hash
+            return content.decode('utf-8').replace('\x00', '')
 
     def get_tree_entries(self, tree_hash):
         """
@@ -49,20 +31,22 @@ class GitVisualizer:
         tree_path = os.path.join('.git', 'objects', tree_hash[:2], tree_hash[2:])
         try:
             tree_content = self.get_object_content(tree_path)
-        except ValueError:
-            print(f"Skipping tree {tree_hash}: embedded null character.")
+        except FileNotFoundError:
+            print(f"Skipping tree {tree_hash}: no such file.")
             return []
 
-        # Игнорировать строки с нулевыми символами
-        lines = [line for line in tree_content.split('\n') if '\x00' not in line]
-
         entries = []
+        lines = tree_content.split('\n')
         for line in lines:
             if not line:
                 continue
             entry_info = line.split(' ')
-            mode, name, entry_hash = entry_info[0], entry_info[-1], entry_info[1]
+            if len(entry_info) != 3:
+                # Некорректный формат строки, пропускаем ее
+                continue
+            mode, name, entry_hash = entry_info
             entries.append({'mode': mode, 'name': name, 'hash': entry_hash})
+
         return entries
 
     def generate_dot_graph(self, commit_hash, depth=0):
@@ -77,9 +61,6 @@ class GitVisualizer:
         dot_graph = f'{indent}"{commit_hash}" [label="{commit_hash[:7]}"];\n'
 
         tree_hash = self.get_commit_info(commit_hash)
-        if tree_hash is None:
-            return dot_graph
-
         entries = self.get_tree_entries(tree_hash)
 
         for entry in entries:
@@ -88,6 +69,19 @@ class GitVisualizer:
                 dot_graph += self.generate_dot_graph(entry['hash'], depth + 1)
 
         return dot_graph
+
+    def get_commit_info(self, commit_hash):
+        """
+        Получает информацию о коммите, основываясь на его хэше.
+
+        :param commit_hash: Хэш коммита.
+        :return: Хэш дерева, связанного с коммитом.
+        """
+        commit_path = os.path.join('.git', 'objects', commit_hash[:2], commit_hash[2:])
+        commit_content = self.get_object_content(commit_path)
+        lines = commit_content.split('\n')
+        tree_hash = lines[0].split(' ')[1]
+        return tree_hash
 
     def get_latest_commit_hash(self):
         """
